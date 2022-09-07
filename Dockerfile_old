@@ -1,0 +1,73 @@
+# 编译 java 项目
+FROM openjdk:8 as Node1
+
+ARG WORK_HOME=/data/plattech/gm/rgm-boot
+
+ARG TOOLS_HOME=/data/plattech/tools
+
+# 阿里源
+ARG MAVEN_LINK=https://mirrors.aliyun.com/apache/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz
+ARG MAVEN_ZIP=$TOOLS_HOME/maven/apache-maven-3.6.3-bin.tar.gz
+
+# 阿里源
+ARG GO_LINK=https://mirrors.aliyun.com/golang/go1.16.linux-amd64.tar.gz
+ARG GO_ZIP=$TOOLS_HOME/go/go1.16.linux-amd64.tar.gz
+
+ENV GOPROXY=https://goproxy.cn
+
+ENV PATH $TOOLS_HOME/maven/apache-maven-3.6.3/bin:$TOOLS_HOME/go/go/bin:$PATH
+
+# 下载 maven
+RUN mkdir -p $TOOLS_HOME/maven \
+    && wget $MAVEN_LINK -O $MAVEN_ZIP \
+    && tar -zvxf $MAVEN_ZIP -C $TOOLS_HOME/maven/
+
+# 下载go
+RUN mkdir -p $TOOLS_HOME/go \
+    && wget $GO_LINK -O $GO_ZIP \
+    && tar -zvxf $GO_ZIP -C $TOOLS_HOME/go/
+
+WORKDIR $WORK_HOME
+
+COPY ./rgm-boot ./
+
+# 这一步是临时的，待会需要删除
+#RUN mkdir -p /root/.m2/repository \
+#    && cp -r ./repository /root/.m2/ \
+#    && cd ./rgm-boot-module-system \
+#    && mvn package \
+#    && cd ./target \
+#    && go build xjar.go
+
+RUN mvn install \
+    && cd ./rgm-boot-module-system \
+    && mvn package \
+    && cd ./target \
+    && go build xjar.go
+
+# ----------------------------------------------------------------------------------------------------------------------------------------
+
+FROM openjdk:8-jre
+
+ARG WORK_HOME=/data/plattech/gm
+
+WORKDIR $WORK_HOME
+
+COPY --from=node_builder $WORK_HOME/ant-design-vue-jeecg/dist ./frontend/dist
+
+COPY --from=java_builder $WORK_HOME/rgm-boot/rgm-boot-module-system/target ./backend/target
+
+COPY ./tools/sources.list /etc/apt/sources.list
+
+COPY ./tools/nginx.conf /etc/nginx/conf.d/default.conf
+COPY ./tools/start.sh $WORK_HOME/backend/target
+
+RUN apt update \
+    && apt install -y nginx=1.14.2-2+deb10u4 \
+    && chmod -R 777 $WORK_HOME/backend/target/start.sh
+
+WORKDIR $WORK_HOME/backend/target
+
+ENTRYPOINT ["./start.sh"]
+
+EXPOSE 80
